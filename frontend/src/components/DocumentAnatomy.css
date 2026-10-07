@@ -1,0 +1,175 @@
+.anatomy .section-sub {
+  margin-bottom: var(--space-2xl);
+}
+
+.anatomy__stage {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3.5rem 5.5rem;
+}
+
+.anatomy__doc {
+  position: relative;
+  width: min(280px, 70%);
+  aspect-ratio: 8.5 / 11;
+  background: #f2f3f5;
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  padding: 12% 10%;
+}
+
+.anatomy__fake-title {
+  height: 10px;
+  width: 70%;
+  background: #8d949e;
+  margin-bottom: 10%;
+}
+
+.anatomy__fake-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12%;
+}
+
+.anatomy__fake-lines span {
+  height: 4px;
+  background: #c8ccd4;
+}
+
+.anatomy__fake-lines span:nth-child(2) { width: 90%; }
+.anatomy__fake-lines span:nth-child(3) { width: 75%; }
+.anatomy__fake-lines span:nth-child(4) { width: 85%; }
+
+.anatomy__fake-table {
+  height: 48px;
+  border: 1px solid #c8ccd4;
+  background:
+    linear-gradient(#c8ccd4 1px, transparent 1px) 0 0 / 100% 16px,
+    linear-gradient(90deg, #c8ccd4 1px, transparent 1px) 0 0 / 25% 100%;
+  margin-bottom: 12%;
+}
+
+.anatomy__fake-lower {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8%;
+}
+
+.anatomy__fake-chart {
+  height: 40px;
+  border-left: 1px solid #b0b6c0;
+  border-bottom: 1px solid #b0b6c0;
+  background: repeating-linear-gradient(
+    90deg,
+    #a8b0bc 0 8px,
+    transparent 8px 14px
+  );
+  background-position: bottom;
+  background-size: 100% 60%;
+  background-repeat: no-repeat;
+}
+
+.anatomy__fake-eq {
+  height: 28px;
+  border: 1px dashed #b0b6c0;
+  margin-top: 8px;
+}
+
+.anatomy__hot {
+  position: absolute;
+  border: 1.5px solid transparent;
+  pointer-events: none;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.anatomy__hot.is-lit {
+  border-color: var(--accent);
+  background: rgba(46, 230, 166, 0.12);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+  animation: bbox-pulse 1.5s ease infinite;
+}
+
+.anatomy__hot--title { top: 8%; left: 8%; width: 70%; height: 8%; }
+.anatomy__hot--body { top: 20%; left: 8%; width: 84%; height: 18%; }
+.anatomy__hot--cols { top: 20%; left: 8%; width: 84%; height: 22%; }
+.anatomy__hot--table { top: 48%; left: 8%; width: 84%; height: 14%; }
+.anatomy__hot--chart { top: 68%; left: 8%; width: 40%; height: 14%; }
+.anatomy__hot--eq { top: 70%; right: 8%; width: 36%; height: 10%; }
+
+.anatomy__pin {
+  position: absolute;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  padding: 0.35rem 0.55rem;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+  z-index: 2;
+  white-space: nowrap;
+}
+
+.anatomy__pin:hover,
+.anatomy__pin.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.anatomy__pin--tl { top: 8%; left: 0; }
+.anatomy__pin--tr { top: 8%; right: 0; }
+.anatomy__pin--ml { top: 32%; left: 0; }
+.anatomy__pin--mr { top: 32%; right: 0; }
+.anatomy__pin--bl { bottom: 22%; left: 0; }
+.anatomy__pin--bm { bottom: 8%; left: 50%; transform: translateX(-50%); }
+.anatomy__pin--br { bottom: 22%; right: 0; }
+.anatomy__pin--lt { top: 52%; left: 0; }
+.anatomy__pin--rt { top: 52%; right: 0; }
+
+.anatomy__explain {
+  text-align: center;
+  margin-top: var(--space-xl);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  min-height: 2.5rem;
+  max-width: 36rem;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .anatomy__stage {
+    padding: 1rem 0 2rem;
+    min-height: auto;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .anatomy__pin {
+    position: static;
+    transform: none !important;
+  }
+
+  .anatomy__stage {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .anatomy__doc {
+    order: -1;
+    width: min(260px, 80%);
+    margin: 0 auto var(--space-md);
+  }
+
+  .anatomy__pin {
+    width: 100%;
+    text-align: left;
+  }
+}

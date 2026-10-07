@@ -1,0 +1,157 @@
+.transform .section-sub {
+  margin-bottom: var(--space-2xl);
+}
+
+.transform__stage {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: var(--space-lg);
+  align-items: stretch;
+}
+
+.transform__pane {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.transform__pane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+}
+
+.transform__badge {
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  padding: 0.15rem 0.45rem;
+}
+
+.transform__badge--ok {
+  color: var(--accent);
+  border-color: rgba(46, 230, 166, 0.4);
+  background: var(--accent-dim);
+}
+
+.transform__raw-body,
+.transform__out-body {
+  flex: 1;
+  padding: var(--space-lg);
+  position: relative;
+}
+
+.transform__noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  background-image: repeating-linear-gradient(
+    -12deg,
+    transparent,
+    transparent 2px,
+    var(--text-primary) 2px,
+    var(--text-primary) 3px
+  );
+  pointer-events: none;
+}
+
+.transform__messy {
+  position: relative;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  font-family: var(--font-mono);
+}
+
+.transform__skew {
+  display: inline-block;
+  transform: skewX(-6deg);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.transform__raw-meta {
+  margin-top: var(--space-lg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.transform__raw-meta li {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--danger);
+  border: 1px solid rgba(255, 92, 92, 0.35);
+  padding: 0.2rem 0.45rem;
+}
+
+.transform__code {
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--accent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.transform__flow {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0 0.25rem;
+  min-width: 110px;
+}
+
+.transform__step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.transform__step-num {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+}
+
+.transform__step-name {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+.transform__connector {
+  width: 1px;
+  height: 18px;
+  background: linear-gradient(to bottom, var(--accent), transparent);
+  margin: 0.15rem 0;
+  animation: fade-in 1.2s ease infinite alternate;
+}
+
+@media (max-width: 900px) {
+  .transform__stage {
+    grid-template-columns: 1fr;
+  }
+
+  .transform__flow {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    min-width: 0;
+    gap: 0.75rem;
+    padding: var(--space-md) 0;
+  }
+
+  .transform__connector {
+    width: 24px;
+    height: 1px;
+    background: linear-gradient(to right, var(--accent), transparent);
+  }
+}

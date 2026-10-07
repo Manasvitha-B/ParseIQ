@@ -1,0 +1,132 @@
+.architecture .section-sub {
+  margin-bottom: var(--space-2xl);
+}
+
+.arch__tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.arch__node {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  padding: 0.7rem 1.25rem;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+  min-width: 160px;
+  text-align: center;
+}
+
+.arch__node:hover,
+.arch__node.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.arch__node--root {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.arch__node--out {
+  border-style: dashed;
+}
+
+.arch__spine {
+  width: 1px;
+  height: 28px;
+  background: linear-gradient(to bottom, var(--accent), rgba(46, 230, 166, 0.2));
+}
+
+.arch__spine--short {
+  height: 20px;
+}
+
+.arch__branch {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  width: min(100%, 480px);
+  height: 24px;
+  position: relative;
+}
+
+.arch__branch::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16.66%;
+  right: 16.66%;
+  height: 1px;
+  background: rgba(46, 230, 166, 0.45);
+}
+
+.arch__branch span {
+  position: relative;
+}
+
+.arch__branch span::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 100%;
+  background: rgba(46, 230, 166, 0.45);
+}
+
+.arch__row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+  width: min(100%, 480px);
+  margin-bottom: 0.25rem;
+}
+
+.arch__node--leaf {
+  min-width: 0;
+  width: 100%;
+  padding: 0.65rem 0.5rem;
+}
+
+.arch__detail {
+  margin-top: var(--space-xl);
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-lg);
+  min-height: 5rem;
+}
+
+.arch__detail-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+.arch__detail-body {
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 560px) {
+  .arch__row {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .arch__branch {
+    display: none;
+  }
+}
