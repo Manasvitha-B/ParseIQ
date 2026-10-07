@@ -1,0 +1,9 @@
+pydantic>=2.0.0
+opencv-python
+numpy
+pymupdf
+pdfplumber
+pandas
+tabulate
+pytesseract
+pillow
