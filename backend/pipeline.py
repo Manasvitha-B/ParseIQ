@@ -10,8 +10,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detection.orchestrator import Orchestrator
+from detection.image_classifier import ImageClassifier
 from detection.router import Router
-from detection.schemas import Block, Box, Document, Page, ParseError, ParseResult, Region
+from detection.schemas import Block, Box, Document, Page, ParseError, ParseResult, Region, RegionType
 
 from backend.adapters import (
     ChartExtractorAdapter,
@@ -24,6 +25,28 @@ from backend.adapters import (
     TextExtractorAdapter,
 )
 from backend.assembler import FinalAssembler
+from backend.vision import get_vision_service
+
+
+class _VisionImageBackend:
+    """Classify and extract a mixed image once; downstream adapters reuse its JSON."""
+    def classify(self, page: Page, region: Region):
+        result = get_vision_service().analyze(page, region)
+        if not result:
+            region.metadata["classification_status"] = "vision_unavailable"
+            return [(RegionType.SCANNED_TEXT, 0.35, {"vision_fallback": True})]
+        if result.get("error"):
+            region.metadata["vision_error"] = result["error"]
+            region.metadata["classification_status"] = "vision_failed"
+            return [(RegionType.SCANNED_TEXT, 0.35, {"vision_fallback": True})]
+        region.metadata["vision_result"] = result
+        route = {
+            "table": "table", "chart": "chart", "figure": "figure",
+            "equation": "equation", "text_block": "text",
+        }.get(result.get("block_type"), "text")
+        from detection.image_classifier import IMAGE_LABELS
+        label = next((key for key, value in IMAGE_LABELS.items() if value.value == route), "text")
+        return [(IMAGE_LABELS[label], result.get("confidence", 0.86), {"vision_result": result, "vision_provider": result.get("provider")})]
 
 
 def build_router() -> Router:
@@ -40,11 +63,12 @@ def build_router() -> Router:
 
 
 def parse_document(path: str) -> ParseResult:
-    """Run the full P1→extract→assemble pipeline with a 55s soft deadline."""
+    """Run extraction with a bounded per-document processing deadline."""
     orchestrator = Orchestrator(
         router=build_router(),
+        image_classifier=ImageClassifier(backend=_VisionImageBackend()),
         assembler=FinalAssembler(),
-        timeout_seconds=55,
+        timeout_seconds=180,
     )
     return orchestrator.parse(path)
 

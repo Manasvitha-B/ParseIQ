@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -186,7 +187,14 @@ def _to_markdown(blocks: list[dict[str, Any]]) -> str:
         elif sem == "equation":
             parts.append(f"$$\n{text}\n$$\n")
         elif sem in ("figure", "chart", "diagram"):
-            parts.append(f"![{sem}]({text})\n")
+            description = text
+            if isinstance(content, dict):
+                description = content.get("description") or content.get("caption") or text
+            if sem == "chart" and isinstance(content, dict) and isinstance(content.get("chart"), dict):
+                chart_json = json.dumps(content["chart"], ensure_ascii=False, indent=2)
+                parts.append(f"**Chart:** {description}\n\n```json\n{chart_json}\n```\n")
+            else:
+                parts.append(f"**{sem.title()}:** {description}\n")
         else:
             if text:
                 parts.append(text)

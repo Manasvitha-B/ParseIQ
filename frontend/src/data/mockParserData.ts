@@ -195,6 +195,12 @@ Revenue increased by 24%.
       { blockId: 'BLOCK_010', level: 'ERROR', reason: 'Unreadable scan region' },
     ],
   },
+  pageSizes: {
+    1: { width: 612, height: 792 },
+    2: { width: 612, height: 792 },
+    3: { width: 612, height: 792 },
+    4: { width: 612, height: 792 },
+  },
 }
 
 export const mockHealthOffline = false

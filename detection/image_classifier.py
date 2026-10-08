@@ -39,5 +39,7 @@ class ImageClassifier:
                 raise ValueError(f"Invalid image classification: {label}")
             output.append(Region(region.source, region.page_number,
                 f"{region.region_id}-{i}", label, region.box, region.reading_order+i-1,
-                confidence, {**region.metadata, **metadata, "parent_region_id": region.region_id}))
+                confidence=confidence,
+                text_hint=region.text_hint,
+                metadata={**(region.metadata or {}), **(metadata or {}), "parent_region_id": region.region_id}))
         return output

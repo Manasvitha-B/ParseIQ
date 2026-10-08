@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.pipeline import parse_document, serialize_result
+from backend.vision import load_local_environment
 
 app = FastAPI(title="ParseIQ", version="1.0.0", description="Document intelligence API")
 
@@ -299,8 +300,11 @@ Implied enterprise value at 12.5x LTM EBITDA is $412m. Net debt of $175m implies
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "ParseIQ"}
+def health() -> dict[str, Any]:
+    load_local_environment()
+    provider = "gemini" if os.getenv("GEMINI_API_KEY") else "openrouter" if os.getenv("OPENROUTER_API_KEY") else None
+    return {"status": "ok", "service": "ParseIQ", "vision_provider": provider,
+            "vision_configured": provider is not None}
 
 
 @app.get("/api/sample")

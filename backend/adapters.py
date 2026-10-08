@@ -12,6 +12,20 @@ import re
 from typing import Any, Iterable
 
 from detection.schemas import Block, Box, Document, Page, Region, RegionType
+from backend.vision import get_vision_service
+
+
+def _vision_result(page: Page, region: Region) -> dict | None:
+    cached = (region.metadata or {}).get("vision_result")
+    if isinstance(cached, dict):
+        return cached
+    result = get_vision_service().analyze(page, region)
+    if isinstance(result, dict) and not result.get("error"):
+        region.metadata["vision_result"] = result
+        return result
+    if isinstance(result, dict) and result.get("error"):
+        region.metadata["vision_error"] = result["error"]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -211,13 +225,27 @@ class OCRExtractorAdapter:
 
     def _ocr(self, page: Page, region: Region) -> tuple[str, float, list[str], dict]:
         hint = _region_text_hint(region)
+        def ai_fallback(local_text: str = "", local_score: float = 0.0):
+            vision = _vision_result(page, region)
+            if vision:
+                text = vision.get("text") or vision.get("latex") or vision.get("description") or ""
+                if vision.get("block_type") == "table" and vision.get("table"):
+                    text = vision["table"].get("markdown") or text
+                if text:
+                    return text, max(0.86, float(vision.get("confidence", 0.86))), [], {
+                        "route": "scanned_text", "engine": vision.get("provider", "vision"),
+                        "vision_model": vision.get("model"), "vision_result": vision,
+                        "local_ocr_confidence": local_score,
+                    }
+            return None
         if importlib.util.find_spec("pytesseract") is None:
-            return (
-                hint,
-                0.35 if hint else 0.2,
-                ["ocr_unavailable", "low_confidence"] + ([] if hint else ["empty_region"]),
-                {"route": "scanned_text", "engine": None},
-            )
+            ai = ai_fallback(hint, 0.0)
+            if ai:
+                return ai
+            return (hint, 0.35 if hint else 0.2,
+                    ["ocr_unavailable", "low_confidence"] + ([] if hint else ["empty_region"]),
+                    {"route": "scanned_text", "engine": None,
+                     "vision_error": (region.metadata or {}).get("vision_error")})
 
         try:
             import pytesseract
@@ -227,6 +255,9 @@ class OCRExtractorAdapter:
 
         image = self._region_image(page, region)
         if image is None:
+            ai = ai_fallback(hint, 0.0)
+            if ai:
+                return ai
             return (
                 hint,
                 0.4 if hint else 0.25,
@@ -249,6 +280,10 @@ class OCRExtractorAdapter:
                     scores.append(c / 100.0)
             text = " ".join(parts).strip() or hint
             conf = float(sum(scores) / len(scores)) if scores else (0.45 if hint else 0.3)
+            if conf < 0.7 or not text:
+                ai = ai_fallback(text, conf)
+                if ai:
+                    return ai
             flags = []
             if conf < 0.6:
                 flags.append("low_confidence")
@@ -256,6 +291,9 @@ class OCRExtractorAdapter:
                 flags.append("empty_region")
             return text, min(0.95, max(0.2, conf)), flags, {"route": "scanned_text", "engine": "pytesseract"}
         except Exception as exc:
+            ai = ai_fallback(hint, 0.0)
+            if ai:
+                return ai
             return hint, 0.3 if hint else 0.2, ["ocr_failed", "low_confidence"], {"error": str(exc)}
 
     def _region_image(self, page: Page, region: Region):
@@ -376,7 +414,8 @@ class TableExtractorAdapter:
                 confidence=conf,
                 extractor=self.name,
                 flags=flags,
-                metadata={"route": "table", "engine": engine, "bbox": _box_list(region.box)},
+                metadata={"route": "table", "engine": engine, "bbox": _box_list(region.box),
+                          "vision_error": (region.metadata or {}).get("vision_error")},
             )
         except Exception as exc:
             hint = _region_text_hint(region)
@@ -427,6 +466,16 @@ class TableExtractorAdapter:
                         return matrix, [], 0.85, "pymupdf"
             except Exception:
                 pass
+
+        # Use vision only when native table extraction did not return cells.
+        visual = _vision_result(page, region)
+        if visual and isinstance(visual.get("table"), dict):
+            matrix = visual["table"].get("matrix")
+            if isinstance(matrix, list) and matrix:
+                clean = [[str(cell if cell is not None else "").strip() for cell in row]
+                         for row in matrix if isinstance(row, list)]
+                if clean:
+                    return clean, [], max(0.86, float(visual.get("confidence", 0.86))), "vision"
 
         # Stub from text_hint
         if hint:
@@ -515,6 +564,25 @@ class EquationExtractorAdapter:
         try:
             text = _extract_text_from_page(page, region)
             math_like = bool(text and _MATH_RE.search(text))
+            if math_like:
+                yield _make_block(
+                    document=document, page=page, region=region, block_type="equation",
+                    content={"latex": text, "text": text, "math_like": True},
+                    confidence=0.95, extractor=self.name,
+                    metadata={"route": "equation", "source": "native_pdf_text", "bbox": _box_list(region.box)},
+                )
+                return
+            visual = _vision_result(page, region)
+            if visual and (visual.get("latex") or visual.get("text")):
+                latex = visual.get("latex") or visual.get("text")
+                yield _make_block(
+                    document=document, page=page, region=region, block_type="equation",
+                    content={"latex": latex, "text": visual.get("text") or latex, "math_like": True},
+                    confidence=max(0.86, float(visual.get("confidence", 0.86))), extractor=self.name,
+                    metadata={"route": "equation", "vision_model": visual.get("model"),
+                              "vision_provider": visual.get("provider"), "bbox": _box_list(region.box)},
+                )
+                return
             flags = []
             conf = 0.9 if math_like else 0.7 if text else 0.4
             if not text:
@@ -562,22 +630,38 @@ def _typed_visual_block(
     extra_meta: dict | None = None,
 ) -> Iterable[Block]:
     try:
-        caption = _region_text_hint(region) or _extract_text_from_page(page, region) or default_caption
+        visual = _vision_result(page, region)
+        caption = ((visual or {}).get("description") or (visual or {}).get("text") or
+                   _region_text_hint(region) or _extract_text_from_page(page, region) or default_caption)
         flags = []
-        conf = 0.88
+        conf = max(0.86, float(visual.get("confidence", 0.86))) if visual else 0.88
         if caption == default_caption:
             flags.append(f"{block_type}_stub")
             conf = 0.55
             flags.append("low_confidence")
         meta = {"route": block_type, "bbox": _box_list(region.box), "provenance": "region_bbox"}
+        if visual:
+            meta.update({"vision_model": visual.get("model"), "vision_provider": visual.get("provider")})
+        elif (region.metadata or {}).get("vision_error"):
+            meta["vision_error"] = region.metadata["vision_error"]
         if extra_meta:
             meta.update(extra_meta)
+        if block_type == "table" and visual and visual.get("table"):
+            content = visual["table"]
+            content.update({"text": caption})
+        elif block_type == "chart" and visual:
+            content = {"caption": caption, "description": visual.get("description", ""),
+                       "chart": visual.get("chart", {})}
+        elif block_type == "equation" and visual:
+            content = {"latex": visual.get("latex", ""), "text": visual.get("text", caption), "math_like": True}
+        else:
+            content = {"caption": caption, "description": caption}
         yield _make_block(
             document=document,
             page=page,
             region=region,
             block_type=block_type,
-            content={"caption": caption, "description": caption},
+            content=content,
             confidence=conf,
             extractor=extractor_name,
             flags=flags,
