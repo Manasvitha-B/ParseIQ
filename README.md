@@ -1,5 +1,4 @@
 # ParseIQ
-
 ParseIQ is a single-document parsing engine built for AI-native document understanding. The project targets the core challenge in enterprise document ingestion: turning messy real-world business files into clean, structured, faithful output that can be searched, reasoned over, and cited by AI systems.
 
 This repository is designed as a hackathon-ready prototype for a unified parser that accepts PDF, images, Office files, HTML, Markdown, email, and other business artifacts, then returns typed blocks with page provenance, reading order, confidence, and structured export formats.
