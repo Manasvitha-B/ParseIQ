@@ -1,6 +1,7 @@
 """Wire adapters → Router → Orchestrator → FinalAssembler."""
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 from typing import Any
@@ -94,13 +95,45 @@ def _document_dict(document: Document | None) -> dict[str, Any] | None:
 
 def _page_dict(page: Page) -> dict[str, Any]:
     # Intentionally omit payload (PyMuPDF page objects are not JSON-serializable)
+    preview = None
+    payload = page.payload if isinstance(page.payload, dict) else {}
+    pdf_page = payload.get("page")
+    if pdf_page is not None and hasattr(pdf_page, "get_pixmap"):
+        try:
+            import fitz
+            scale = min(1.0, 620.0 / max(float(page.width or 620), 1.0))
+            pix = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            preview = "data:image/jpeg;base64," + base64.b64encode(
+                pix.tobytes("jpeg", jpg_quality=68)
+            ).decode("ascii")
+        except Exception:
+            preview = None
+    elif (page.metadata or {}).get("image_path"):
+        try:
+            from PIL import Image
+            from io import BytesIO
+            image_path = page.metadata["image_path"]
+            with Image.open(image_path) as source:
+                frame_index = int(page.metadata.get("frame_index", 0) or 0)
+                if getattr(source, "n_frames", 1) > 1:
+                    source.seek(min(max(frame_index, 0), source.n_frames - 1))
+                image = source.convert("RGB")
+                image.thumbnail((620, 1200), Image.Resampling.LANCZOS)
+                output = BytesIO()
+                image.save(output, format="JPEG", quality=72, optimize=True)
+                preview = "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+        except Exception:
+            preview = None
+    safe_metadata = dict(page.metadata or {})
+    safe_metadata.pop("image_path", None)
     return {
         "source": page.source,
         "number": page.number,
         "unit_type": page.unit_type,
         "width": page.width,
         "height": page.height,
-        "metadata": dict(page.metadata or {}),
+        "preview": preview,
+        "metadata": safe_metadata,
     }
 
 

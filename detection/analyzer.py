@@ -1,7 +1,10 @@
 """Page and region analysis. It emits locations/types, never extracted content."""
 from __future__ import annotations
+import re
 from typing import Protocol
 from .schemas import Document, FileType, Page, Region, RegionType, Box
+
+_LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*•●◦▪]|\d+[.)]|[a-zA-Z][.)])\s*")
 
 class Analyzer(Protocol):
     def analyze(self, document: Document, page: Page) -> list[Region]: ...
@@ -32,8 +35,91 @@ class RegionAnalyzer:
         if page.metadata.get("pdf_type")=="scanned":
             return [Region(page.source,page.number,f"p{page.number}-scan",RegionType.SCANNED_TEXT,
                 metadata={"route_hint":"ocr","classification_status":"page_detected_as_scanned"})]
+        def heading_candidate(block, gap_after):
+            text=str(block.get("text", "")).strip()
+            if not text:
+                return False
+            # Wrapped prose and list continuations commonly begin in lowercase.
+            # A font-size/weight signal can still identify a deliberate title,
+            # but whitespace alone must not turn a sentence continuation into one.
+            starts_lowercase = bool(text and text[0].islower())
+            if starts_lowercase:
+                return False
+            base=float(block.get("page_font_size", 0) or 0)
+            size=float(block.get("font_size_max", 0) or 0)
+            bold=float(block.get("bold_fraction", 0) or 0) >= .55
+            short=len(text) <= 150 and int(block.get("line_count", 1) or 1) <= 3
+            if not short:
+                return False
+            if base and size >= base * 1.18:
+                return True
+            if bold:
+                return True
+            # Standalone section labels often use body-size type but have
+            # deliberate whitespace after them. Length alone never makes a heading.
+            return bool(base and len(text) <= 100 and gap_after >= base * .55
+                        and not text.endswith((".", ",", ";", "?", "!")))
+
+        def starts_list(text):
+            return bool(_LIST_PREFIX_RE.match(text.replace("\u200b", "")))
+
+        prepared=[]
         for i,b in enumerate(blocks):
             x0,y0,x1,y1=b.get("bbox",(0,0,0,0))
+            text=str(b.get("text", "")).strip()
+            if not text:
+                continue
+            gap_after=0.0
+            # PDF text blocks are frequently split into one block per visual line.
+            # Measure the next block's vertical gap to avoid treating every line as
+            # an independent semantic heading.
+            for following in blocks[i+1:]:
+                fy0=following.get("bbox",(0,0,0,0))[1]
+                fx0,_,fx1,_=following.get("bbox",(0,0,0,0))
+                horizontal_overlap=min(x1,fx1)-max(x0,fx0)
+                if horizontal_overlap > 0 and fy0 >= y0:
+                    gap_after=max(0.0,float(fy0)-float(y1))
+                    break
+            prepared.append({**b,"bbox":(float(x0),float(y0),float(x1),float(y1)),
+                             "gap_after":gap_after,"heading_candidate":heading_candidate(b,gap_after)})
+
+        # Join adjacent visual lines into paragraph-sized regions. Keep section
+        # labels, list items, columns, and differently styled text as boundaries.
+        grouped=[]
+        for block in prepared:
+            if not grouped:
+                grouped.append(dict(block))
+                continue
+            current=grouped[-1]
+            cx0,cy0,cx1,cy1=current["bbox"]
+            x0,y0,x1,y1=block["bbox"]
+            gap=y0-cy1
+            base=max(float(block.get("page_font_size",0) or 0),float(current.get("page_font_size",0) or 0),1)
+            same_column=abs(x0-cx0)<=max(28.0,base*1.5)
+            similar_font=abs(float(block.get("font_size_avg",0) or 0)-float(current.get("font_size_avg",0) or 0))<=max(2.0,base*.15)
+            current_heading=bool(current.get("heading_candidate")); next_heading=bool(block.get("heading_candidate"))
+            heading_boundary=next_heading and not current_heading
+            next_is_new_bullet=starts_list(str(block.get("text", "")))
+            lowercase_continuation = bool(str(block.get("text", "")).strip()[:1].islower())
+            join=(gap>=-1 and gap<=max(6.0,base*.35) and same_column and similar_font
+                  and not heading_boundary and not next_is_new_bullet
+                  and not (current_heading and not next_heading and not lowercase_continuation))
+            if not join:
+                grouped.append(dict(block))
+                continue
+            current["bbox"]=(min(cx0,x0),min(cy0,y0),max(cx1,x1),max(cy1,y1))
+            current["text"]=(str(current.get("text", "")).rstrip()+"\n"+str(block.get("text", "")).lstrip()).strip()
+            current["font_size_min"]=min(float(current.get("font_size_min",99)),float(block.get("font_size_min",99)))
+            current["font_size_max"]=max(float(current.get("font_size_max",0)),float(block.get("font_size_max",0)))
+            current["bold_fraction"]=max(float(current.get("bold_fraction",0)),float(block.get("bold_fraction",0)))
+            current["gap_after"]=float(block.get("gap_after",0))
+            current_page_font=float(current.get("page_font_size",0) or 0)
+            current_size=float(current.get("font_size_max",0) or 0)
+            is_continuing_large_title=lowercase_continuation and current_page_font>0 and current_size>=current_page_font*1.18
+            current["heading_candidate"]=current_heading and (next_heading or is_continuing_large_title)
+
+        for i,b in enumerate(grouped):
+            x0,y0,x1,y1=b["bbox"]
             font_size=b.get("font_size_min",99)
             if page.height and y0<page.height*.08: typ=RegionType.HEADER
             elif page.height and y1>page.height*.92 and font_size<9: typ=RegionType.FOOTNOTE
@@ -42,7 +128,11 @@ class RegionAnalyzer:
             else: typ=RegionType.DIGITAL_TEXT
             regions.append(Region(page.source,page.number,f"p{page.number}-text-{i+1}",typ,
                 Box(float(x0),float(y0),float(x1),float(y1)),i,.8,
-                {"font_size_min":font_size,"font_names":b.get("font_names",[])}))
+                text_hint=b.get("text", ""),metadata={
+                    "font_size_min":font_size,"font_size_max":b.get("font_size_max",font_size),
+                    "font_size_avg":b.get("font_size_avg",font_size),"page_font_size":b.get("page_font_size",0),
+                    "bold_fraction":b.get("bold_fraction",0),"line_count":b.get("line_count",1),
+                    "heading_candidate":b.get("heading_candidate",False),"font_names":b.get("font_names",[])}))
         if not blocks and data.get("has_text"):
             regions.append(Region(page.source,page.number,f"p{page.number}-text-1",RegionType.DIGITAL_TEXT,
                 Box(0,0,float(page.width or 0),float(page.height or 0)),0,.65,

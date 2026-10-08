@@ -201,6 +201,7 @@ Revenue increased by 24%.
     3: { width: 612, height: 792 },
     4: { width: 612, height: 792 },
   },
+  pagePreviews: {},
 }
 
 export const mockHealthOffline = false

@@ -24,6 +24,7 @@ def detect_file(path: str | Path) -> Document:
     elif head.startswith(b"\x89PNG\r\n\x1a\n"): kind = FileType.PNG
     elif head.startswith(b"\xff\xd8\xff"): kind = FileType.JPG
     elif head.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")): kind = FileType.TIFF
+    elif head.startswith(b"RIFF") and head[8:12] == b"WEBP": kind = FileType.WEBP
     elif head.startswith(b"PK\x03\x04"):
         try:
             with zipfile.ZipFile(p) as z:
@@ -41,7 +42,7 @@ def detect_file(path: str | Path) -> Document:
         except (UnicodeDecodeError, OSError) as e: raise DetectionFailure("INVALID_TEXT", "TXT/CSV must be readable UTF-8") from e
         kind = FileType.TXT if ext == ".txt" else FileType.CSV
     if kind is None:
-        if ext in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".csv", ".ppt", ".pptx"}:
+        if ext in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".doc", ".docx", ".txt", ".xls", ".xlsx", ".csv", ".ppt", ".pptx"}:
             raise DetectionFailure("SIGNATURE_MISMATCH", f"Contents do not match supported extension {ext}")
         kind = FileType.UNKNOWN
     digest = hashlib.sha256()

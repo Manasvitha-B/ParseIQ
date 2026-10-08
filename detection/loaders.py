@@ -6,6 +6,7 @@ import importlib.util
 import shutil
 import subprocess
 import tempfile
+import statistics
 from pathlib import Path
 from .schemas import Document, FileType, Page
 
@@ -17,7 +18,7 @@ class LoaderFailure(Exception):
 def load_pages(document: Document) -> list[Page]:
     p = Path(document.source); kind = document.file_type
     if kind == FileType.PDF: return _load_pdf(p)
-    if kind in (FileType.PNG, FileType.JPG, FileType.TIFF): return _load_image(p)
+    if kind in (FileType.PNG, FileType.JPG, FileType.TIFF, FileType.WEBP): return _load_image(p)
     if kind == FileType.TXT:
         separators=0
         with p.open(encoding="utf-8-sig") as stream:
@@ -72,11 +73,26 @@ def _load_pdf(p):
             for i, page in enumerate(doc):
                 raw = page.get_text("dict")
                 text_blocks=[]
+                all_spans = [span for block in raw.get("blocks", []) if block.get("type") == 0
+                             for line in block.get("lines", []) for span in line.get("spans", [])
+                             if str(span.get("text", "")).strip()]
+                page_font_size = statistics.median(float(span.get("size", 0)) for span in all_spans) if all_spans else 0.0
                 for b in raw.get("blocks",[]):
                     if b.get("type") != 0: continue
                     spans=[s for line in b.get("lines",[]) for s in line.get("spans",[])]
-                    text_blocks.append({"bbox":b.get("bbox"),"type":b.get("type"),
-                        "font_size_min":min((float(s.get("size",99)) for s in spans),default=99),
+                    text="\n".join("".join(str(s.get("text", "")) for s in line.get("spans", []))
+                                    for line in b.get("lines", []))
+                    text=text.replace("\u200b", "").strip()
+                    if not text:
+                        continue
+                    sizes=[float(s.get("size",99)) for s in spans if str(s.get("text", "")).replace("\u200b", "").strip()]
+                    bold_spans=[s for s in spans if str(s.get("text", "")).replace("\u200b", "").strip()]
+                    bold_fraction=(sum(1 for s in bold_spans if (int(s.get("flags",0)) & 16) or "bold" in str(s.get("font", "")).lower()) / len(bold_spans)) if bold_spans else 0.0
+                    text_blocks.append({"bbox":b.get("bbox"),"type":b.get("type"),"text":text,
+                        "font_size_min":min(sizes,default=99), "font_size_max":max(sizes,default=0),
+                        "font_size_avg":(sum(sizes)/len(sizes)) if sizes else 0,
+                        "page_font_size":page_font_size, "bold_fraction":bold_fraction,
+                        "line_count":len(b.get("lines",[])),
                         "font_names":sorted({str(s.get("font","")) for s in spans})})
                 has_text=bool(text_blocks)
                 images = page.get_images(full=True)

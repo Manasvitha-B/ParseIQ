@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -159,7 +158,15 @@ def _try_enrich_with_parser(block_dicts: list[dict[str, Any]]) -> list[dict[str,
 
 def _to_markdown(blocks: list[dict[str, Any]]) -> str:
     parts: list[str] = []
+    current_page = None
     for b in sorted(blocks, key=lambda x: (x.get("page") or 0, x.get("reading_order") or 0, x.get("block_id") or "")):
+        page = b.get("page")
+        if page is not None and page != current_page:
+            if parts:
+                parts.append("")
+            parts.append(f"## Section / Page {page}")
+            parts.append("")
+            current_page = page
         sem = (b.get("type") or "paragraph").lower()
         text = b.get("text") or _content_as_text(b.get("content"))
         content = b.get("content")
@@ -183,18 +190,45 @@ def _to_markdown(blocks: list[dict[str, Any]]) -> str:
             else:
                 md = text
             parts.append(md)
+            notes = content.get("description") if isinstance(content, dict) else None
+            if notes and notes != md:
+                parts.append("")
+                parts.append(f"**Visible text / notes:** {notes}")
             parts.append("")
         elif sem == "equation":
-            parts.append(f"$$\n{text}\n$$\n")
+            latex = content.get("latex") if isinstance(content, dict) else None
+            parts.append(f"$$\n{latex or text}\n$$\n")
+            if text and latex and text.strip() != str(latex).strip():
+                parts.append(f"**Visible text:** {text}")
+                parts.append("")
         elif sem in ("figure", "chart", "diagram"):
             description = text
             if isinstance(content, dict):
                 description = content.get("description") or content.get("caption") or text
             if sem == "chart" and isinstance(content, dict) and isinstance(content.get("chart"), dict):
-                chart_json = json.dumps(content["chart"], ensure_ascii=False, indent=2)
-                parts.append(f"**Chart:** {description}\n\n```json\n{chart_json}\n```\n")
+                chart = content["chart"]
+                chart_title = chart.get("title") or description or "Extracted chart"
+                parts.append(f"### {chart_title}")
+                parts.append("")
+                chart_text = content.get("text")
+                if chart_text:
+                    parts.append(f"**Transcribed chart text:** {chart_text}")
+                    parts.append("")
+                parts.append("**Extracted Data Table:**")
+                parts.append("")
+                parts.append(content.get("data_table_markdown") or "| Category | Value |\n|---|---|\n| No legible values | — |")
+                code = content.get("python_code")
+                if code:
+                    parts.append("")
+                    parts.append("**Plotted Code:**")
+                    parts.append("")
+                    parts.append(f"```python\n{code.rstrip()}\n```")
             else:
                 parts.append(f"**{sem.title()}:** {description}\n")
+                figure_text = content.get("text") if isinstance(content, dict) else None
+                if figure_text and figure_text != description:
+                    parts.append(f"**Transcribed text:** {figure_text}")
+                    parts.append("")
         else:
             if text:
                 parts.append(text)

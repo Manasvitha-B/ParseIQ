@@ -8,7 +8,7 @@ from typing import Any
 
 class FileType(str, Enum):
     PDF = "pdf"; SCANNED_PDF = "scanned_pdf"
-    PNG = "png"; JPG = "jpg"; TIFF = "tiff"
+    PNG = "png"; JPG = "jpg"; TIFF = "tiff"; WEBP = "webp"
     DOC = "doc"; DOCX = "docx"; TXT = "txt"
     XLS = "xls"; XLSX = "xlsx"; CSV = "csv"
     PPT = "ppt"; PPTX = "pptx"; UNKNOWN = "unknown"

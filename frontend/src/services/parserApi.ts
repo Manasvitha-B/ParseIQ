@@ -35,6 +35,7 @@ export interface ParseResult {
   markdown: string
   json: Record<string, unknown>
   pageSizes: Record<number, { width: number; height: number }>
+  pagePreviews: Record<number, string>
 }
 
 type RawObject = Record<string, unknown>
@@ -65,13 +66,20 @@ function normalizeBBox(value: unknown): BBox {
 
 function normalizeResult(rawValue: unknown): ParseResult {
   const raw = asObject(rawValue)
+  const rawErrors = Array.isArray(raw.errors) ? raw.errors : []
+  if (raw.status === 'failed' && rawErrors.length) {
+    const firstError = asObject(rawErrors[0])
+    throw new Error(asString(firstError.message, asString(firstError.code, 'Document parsing failed')))
+  }
   const document = asObject(raw.document)
   const pages = Array.isArray(raw.pages) ? raw.pages : []
   const pageSizes: ParseResult['pageSizes'] = {}
+  const pagePreviews: ParseResult['pagePreviews'] = {}
   for (const value of pages) {
     const page = asObject(value)
     const number = Number(page.number) || 1
     pageSizes[number] = { width: Number(page.width) || 612, height: Number(page.height) || 792 }
+    if (typeof page.preview === 'string' && page.preview.startsWith('data:image/')) pagePreviews[number] = page.preview
   }
   const blocks = (Array.isArray(raw.blocks) ? raw.blocks : []).map((value, index): ParseBlock => {
     const block = asObject(value)
@@ -112,7 +120,7 @@ function normalizeResult(rawValue: unknown): ParseResult {
     status: asString(raw.status, 'complete'), demoMode: Boolean(raw.demo_mode),
     filename: asString(document.original_filename, asString(document.filename, 'document')),
     pageCount, processingMs: Number(raw.processing_ms) || 0, stages, blocks, structure,
-    markdown: asString(raw.markdown), json: asObject(raw.json_export ?? raw), pageSizes,
+    markdown: asString(raw.markdown), json: asObject(raw.json_export ?? raw), pageSizes, pagePreviews,
   }
 }
 

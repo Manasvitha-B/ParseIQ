@@ -16,9 +16,11 @@ if str(ROOT) not in sys.path:
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.pipeline import parse_document, serialize_result
 from backend.vision import load_local_environment
+from backend.chart_output import chart_artifacts, render_chart_image
 
 app = FastAPI(title="ParseIQ", version="1.0.0", description="Document intelligence API")
 
@@ -40,6 +42,13 @@ app.add_middleware(
 
 def _sample_parse_result() -> dict[str, Any]:
     """Prebuilt PE diligence memo so demos work without an upload."""
+    arr_chart = {
+        "chart_type": "bar",
+        "title": "ARR Bridge",
+        "x_axis": "Period",
+        "y_axis": "ARR ($m)",
+        "series": [{"name": "ARR", "labels": ["Beginning", "Ending"], "values": [150, 186]}],
+    }
     blocks = [
         {
             "block_id": "BLOCK_001",
@@ -140,6 +149,10 @@ def _sample_parse_result() -> dict[str, Any]:
             "content": {
                 "caption": "Figure 2 — ARR bridge: beginning $150m → ending $186m (+24%)",
                 "description": "Figure 2 — ARR bridge: beginning $150m → ending $186m (+24%)",
+                "text": "Figure 2 — ARR bridge: beginning $150m → ending $186m (+24%)",
+                "chart": arr_chart,
+                **chart_artifacts(arr_chart),
+                "plot_image": render_chart_image(arr_chart),
             },
             "text": "Figure 2 — ARR bridge: beginning $150m → ending $186m (+24%)",
             "page": 2,
@@ -317,6 +330,7 @@ async def parse(file: UploadFile = File(...)) -> JSONResponse:
     """Accept a multipart upload, run the pipeline, return structured JSON."""
     suffix = Path(file.filename or "upload.bin").suffix or ".bin"
     tmp_path: str | None = None
+    parse_result = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="parseiq-") as tmp:
             tmp_path = tmp.name
@@ -327,8 +341,10 @@ async def parse(file: UploadFile = File(...)) -> JSONResponse:
                 tmp.write(chunk)
 
         try:
-            result = parse_document(tmp_path)
-            payload = serialize_result(result)
+            # OCR and vision calls are synchronous/CPU-bound. Keep them off the
+            # event loop so health checks and subsequent uploads remain usable.
+            parse_result = await run_in_threadpool(parse_document, tmp_path)
+            payload = serialize_result(parse_result)
         except Exception as exc:
             # Truly unexpected — still return structured JSON (HTTP 200)
             payload = {
@@ -367,6 +383,20 @@ async def parse(file: UploadFile = File(...)) -> JSONResponse:
 
         return JSONResponse(content=payload, status_code=200)
     finally:
+        # PyMuPDF keeps the uploaded file open through page objects. Close its
+        # document before unlinking the temporary file (required on Windows).
+        if parse_result is not None:
+            closed_documents: set[int] = set()
+            for page in parse_result.pages:
+                page_data = page.payload if isinstance(page.payload, dict) else {}
+                pdf_page = page_data.get("page")
+                pdf_document = getattr(pdf_page, "parent", None)
+                if pdf_document is not None and id(pdf_document) not in closed_documents:
+                    closed_documents.add(id(pdf_document))
+                    try:
+                        pdf_document.close()
+                    except Exception:
+                        pass
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
