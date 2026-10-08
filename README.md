@@ -383,7 +383,7 @@ The interactive docs are available at:
 ```text
 http://127.0.0.1:8000/docs
 ```
-## 14. Suggested next improvements
+## 11. Suggested next improvements
 
 - strengthen table merging across page breaks
 - improve chart value extraction from visual plots
