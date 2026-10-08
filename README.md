@@ -392,4 +392,7 @@ http://127.0.0.1:8000/docs
 - add provenance-review tooling for human validation
 
 ---
+## 12. Power Point Presentation
+Link - https://docs.google.com/presentation/d/1VIFOZFEtfs0wQac_9zdZkz1NikNKqzu0/edit?usp=sharing&ouid=106991204557989742785&rtpof=true&sd=true
 
+---
