@@ -41,6 +41,11 @@ export interface ParseResult {
 type RawObject = Record<string, unknown>
 const asObject = (value: unknown): RawObject => value && typeof value === 'object' ? value as RawObject : {}
 const asString = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`
+}
 
 function contentText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -126,7 +131,7 @@ function normalizeResult(rawValue: unknown): ParseResult {
 
 async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   let response: Response
-  try { response = await fetch(url, init) }
+  try { response = await fetch(apiUrl(url), init) }
   catch { throw new Error('Could not reach the ParseIQ backend. Start it with `python -m backend.run` and retry.') }
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -139,7 +144,7 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
 }
 
 export async function healthCheck(): Promise<boolean> {
-  try { return (await fetch('/api/health')).ok } catch { return false }
+  try { return (await fetch(apiUrl('/api/health'))).ok } catch { return false }
 }
 
 export async function uploadDocument(file: File): Promise<ParseResult> {

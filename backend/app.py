@@ -22,18 +22,27 @@ from backend.pipeline import parse_document, serialize_result
 from backend.vision import load_local_environment
 from backend.chart_output import chart_artifacts, render_chart_image
 
+load_local_environment()
+
 app = FastAPI(title="ParseIQ", version="1.0.0", description="Document intelligence API")
+
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("PARSEIQ_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=_cors_origins or _DEFAULT_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
