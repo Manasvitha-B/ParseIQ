@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import {
   loadSampleDocument,
   uploadDocument,
@@ -7,7 +9,7 @@ import {
 } from '../services/parserApi'
 import './ParserDemo.css'
 
-type OutputTab = 'plots' | 'structure' | 'preview' | 'json' | 'markdown'
+type OutputTab = 'structure' | 'preview' | 'json' | 'markdown'
 type Stage = 'IDLE' | 'PROCESSING' | 'COMPLETE'
 const STAGE_ORDER: Stage[] = ['PROCESSING', 'COMPLETE']
 
@@ -20,9 +22,19 @@ function readableLabel(value: string): string {
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-function isPlotImage(value: unknown): value is string {
+function isInlineImage(value: unknown): value is string {
   return typeof value === 'string' &&
     /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)
+}
+
+function MathExpression({ expression }: { expression: string }) {
+  const markup = katex.renderToString(expression, {
+    displayMode: true,
+    throwOnError: false,
+    strict: 'ignore',
+    trust: false,
+  })
+  return <div className="demo__equation-typeset" dangerouslySetInnerHTML={{ __html: markup }} />
 }
 
 function parseMarkdownTable(value: string): string[][] | null {
@@ -37,13 +49,13 @@ function parseMarkdownTable(value: string): string[][] | null {
 function JsonPreviewValue({ label, value }: { label: string; value: unknown }) {
   if (label === 'python_code') return null
 
-  if (label === 'plot_image') {
-    return isPlotImage(value)
+  if (label === 'plot_image' || label === 'source_image') {
+    return isInlineImage(value)
       ? <figure className="demo__preview-plot">
-        <figcaption className="demo__preview-label">Rendered chart</figcaption>
-        <img src={value} alt="Chart generated from the extracted document data" />
+        <figcaption className="demo__preview-label">{label === 'plot_image' ? 'Rendered chart' : 'Extracted source image'}</figcaption>
+        <img src={value} alt={label === 'plot_image' ? 'Chart generated from the extracted document data' : 'Extracted image crop from the document'} />
       </figure>
-      : <p className="demo__preview-muted">No chart image was generated for this extraction.</p>
+      : label === 'plot_image' ? <p className="demo__preview-muted">No chart image was generated for this extraction.</p> : null
   }
 
   if (label === 'data_table_markdown' && typeof value === 'string') {
@@ -103,8 +115,9 @@ function JsonPreviewValue({ label, value }: { label: string; value: unknown }) {
   const entries = Object.entries(value as Record<string, unknown>)
   const tableHeaders = (value as Record<string, unknown>).headers
   const tableRows = (value as Record<string, unknown>).rows
-  const displayEntries = entries.filter(([key]) => !['headers', 'rows', 'python_code', 'plot_image'].includes(key))
+  const displayEntries = entries.filter(([key]) => !['headers', 'rows', 'python_code', 'plot_image', 'source_image'].includes(key))
   const plotImage = (value as Record<string, unknown>).plot_image
+  const sourceImage = (value as Record<string, unknown>).source_image
   return <section className="demo__preview-section">
     <h4 className="demo__preview-heading">{readableLabel(label)}</h4>
     {displayEntries.length > 0 && (
@@ -114,6 +127,7 @@ function JsonPreviewValue({ label, value }: { label: string; value: unknown }) {
         )}
       </div>
     )}
+    {sourceImage !== undefined && <JsonPreviewValue label="source_image" value={sourceImage} />}
     {plotImage !== undefined && <JsonPreviewValue label="plot_image" value={plotImage} />}
     {Array.isArray(tableHeaders) && Array.isArray(tableRows) && (
       <div className="demo__table-wrap"><table className="demo__table">
@@ -246,10 +260,12 @@ function renderBlock(block: ParseBlock): ReactNode {
     </div>
   }
   const latex = typeof content.latex === 'string' ? content.latex : ''
-  if (block.type === 'equation' && latex) return <div className="demo__equation">
-    <div className="demo__equation-display">{`$$ ${latex} $$`}</div>
+  if (block.type === 'equation') return <div className="demo__equation">
+    {latex
+      ? <MathExpression expression={latex} />
+      : block.text && <p className="demo__equation-text">{block.text}</p>}
     {block.text && block.text !== latex && <p className="demo__block-text">{block.text}</p>}
-    <details className="demo__chart-details"><summary>LaTeX source</summary><pre className="demo__code mono"><code>{latex}</code></pre></details>
+    {latex && <details className="demo__chart-details"><summary>LaTeX source</summary><pre className="demo__code mono"><code>{latex}</code></pre></details>}
   </div>
   if (['figure', 'diagram'].includes(block.type)) {
     const description = String(content.description ?? content.caption ?? '')
@@ -261,14 +277,68 @@ function renderBlock(block: ParseBlock): ReactNode {
   return block.text ? <p className="demo__block-text">{block.text}</p> : <p className="demo__empty mono">No readable content in this region</p>
 }
 
-function renderPlotBlock(block: ParseBlock): ReactNode {
+function renderVisualBlock(block: ParseBlock, result: ParseResult): ReactNode {
   const content = object(block.content)
   const chart = object(content.chart)
-  const title = String(chart.title || content.caption || `Chart on page ${block.page}`)
-  const image = typeof content.plot_image === 'string' ? content.plot_image : ''
-  return <article className="demo__plot-card" key={block.id}>
-    <div className="demo__plot-heading"><h3>{title}</h3><span className="mono">PAGE {block.page}</span></div>
-    {image ? <img className="demo__plot-image" src={image} alt={`Matplotlib plot: ${title}`} /> : <div className="demo__plot-fallback">{renderBlock(block)}</div>}
+  const equation = typeof content.latex === 'string' ? content.latex : ''
+  const title = String(chart.title || content.caption || content.description || block.text || `Visual on page ${block.page}`)
+  const extractedImage = isInlineImage(content.source_image) ? content.source_image : ''
+  const sourceImage = result.pagePreviews[block.page]
+  const pageSize = result.pageSizes[block.page]
+  const { x, y, w, h } = block.bbox
+  const hasCrop = Boolean(!extractedImage && sourceImage && pageSize && w > 0 && h > 0)
+  const plotImage = isInlineImage(content.plot_image) ? content.plot_image : ''
+  const dataTable = typeof content.data_table_markdown === 'string'
+    ? parseMarkdownTable(content.data_table_markdown)
+    : null
+  const text = String(content.description || content.text || block.text || '')
+  const visionError = typeof object(block.metadata).vision_error === 'string'
+    ? String(object(block.metadata).vision_error)
+    : ''
+
+  return <article className="demo__visual-card" key={block.id}>
+    <div className="demo__visual-heading">
+      <h4>{block.type === 'equation' ? 'Extracted equation' : title}</h4>
+      <span className="mono">{block.type.toUpperCase()} · PAGE {block.page}</span>
+    </div>
+    {text && text !== title && <p className="demo__visual-description">{text}</p>}
+    {block.type === 'equation' && equation && <MathExpression expression={equation} />}
+    <div className="demo__visual-images">
+      {extractedImage && <figure className="demo__visual-image">
+        <figcaption className="demo__preview-label">Extracted source image</figcaption>
+        <img src={extractedImage} alt={`Extracted ${block.type} from page ${block.page}`} />
+      </figure>}
+      {hasCrop && <figure className="demo__visual-image">
+        <figcaption className="demo__preview-label">Source from document</figcaption>
+        <div className="demo__visual-crop" style={{ aspectRatio: `${w} / ${h}` }}>
+          <img
+            src={sourceImage}
+            alt={`Extracted ${block.type} from page ${block.page}`}
+            style={{
+              left: `${-(x / w) * 100}%`,
+              top: `${-(y / h) * 100}%`,
+              width: `${(pageSize.width / w) * 100}%`,
+              height: `${(pageSize.height / h) * 100}%`,
+            }}
+          />
+        </div>
+      </figure>}
+      {plotImage && <figure className="demo__visual-image">
+        <figcaption className="demo__preview-label">Graph reconstructed from extracted data</figcaption>
+        <img src={plotImage} alt={`Reconstructed chart: ${title}`} />
+      </figure>}
+    </div>
+    {visionError && <p className="demo__visual-warning" role="status">
+      AI extraction did not return structured visual data: {visionError}. The source image is shown when available.
+    </p>}
+    {!hasCrop && !extractedImage && !plotImage && <p className="demo__preview-muted">No visual preview was returned for this item.</p>}
+    {dataTable && <div className="demo__table-wrap"><table className="demo__table">
+      <thead><tr>{dataTable[0].map((cell, index) => <th key={index}>{cell}</th>)}</tr></thead>
+      <tbody>{dataTable.slice(1).map((row, rowIndex) => <tr key={rowIndex}>
+        {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+      </tr>)}</tbody>
+    </table></div>}
+    {block.confidence > 0 && <p className="demo__visual-confidence mono">EXTRACTION CONFIDENCE {Math.round(block.confidence * 100)}%</p>}
   </article>
 }
 
@@ -309,7 +379,7 @@ export default function ParserDemo() {
       setResult(data)
       const initialBlock = data.blocks.find((block) => block.type === 'chart') ?? data.blocks[0]
       setCurrentPage(initialBlock?.page ?? 1)
-      setTab(data.blocks.some((block) => block.type === 'chart') ? 'plots' : 'structure')
+      setTab(data.blocks.some((block) => ['chart', 'figure', 'diagram', 'equation'].includes(block.type)) ? 'preview' : 'structure')
       if (initialBlock) {
         setSelectedBlock(initialBlock.id)
         setShowOriginalPage(initialBlock.type !== 'chart')
@@ -495,7 +565,6 @@ export default function ParserDemo() {
             <div className="demo__tabs" role="tablist" aria-label="Output format">
               {(
                 [
-                  ['plots', 'PLOTS'],
                   ['structure', 'STRUCTURE'],
                   ['preview', 'PREVIEW'],
                   ['json', 'JSON'],
@@ -541,19 +610,23 @@ export default function ParserDemo() {
                 </ul>
               )}
 
-              {result && tab === 'plots' && (
-                <div className="demo__plots">
-                  {result.blocks.filter((block) => block.type === 'chart').map(renderPlotBlock)}
-                  {!result.blocks.some((block) => block.type === 'chart') && <p className="demo__empty mono">No charts were extracted from this document.</p>}
-                </div>
-              )}
-
               {result && tab === 'preview' && (
                 <div className="demo__json-preview" aria-label="Readable preview of all generated JSON data">
                   <p className="demo__preview-intro">Extracted results from {result.filename}</p>
-                  {Object.entries(result.json).map(([key, value]) =>
-                    <JsonPreviewValue key={key} label={key} value={value} />,
+                  {result.blocks.some((block) => ['chart', 'figure', 'diagram', 'equation'].includes(block.type)) && (
+                    <section className="demo__visual-results">
+                      <h3 className="demo__visual-results-heading">Extracted visuals and equations</h3>
+                      {result.blocks
+                        .filter((block) => ['chart', 'figure', 'diagram', 'equation'].includes(block.type))
+                        .map((block) => renderVisualBlock(block, result))}
+                    </section>
                   )}
+                  {Object.entries(result.json).map(([key, value]) => {
+                    const displayValue = key === 'blocks' && Array.isArray(value)
+                      ? value.filter((block) => !['chart', 'figure', 'diagram', 'equation'].includes(String(object(block).type)))
+                      : value
+                    return <JsonPreviewValue key={key} label={key} value={displayValue} />
+                  })}
                 </div>
               )}
 

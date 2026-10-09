@@ -14,7 +14,7 @@ from typing import Any, Iterable
 
 from detection.schemas import Block, Box, Document, Page, Region, RegionType
 from backend.vision import get_vision_service
-from backend.chart_output import chart_artifacts, render_chart_image
+from backend.chart_output import chart_artifacts, render_chart_image, render_region_image
 
 
 def _vision_result(page: Page, region: Region) -> dict | None:
@@ -199,7 +199,8 @@ def _chart_blocks(
         text = str(visual.get("text") or "").strip()
         content = {"text": text or caption, "caption": caption,
                    "description": str(visual.get("description") or ""), "chart": chart,
-                   **chart_artifacts(chart), "plot_image": render_chart_image(chart)}
+                   **chart_artifacts(chart), "plot_image": render_chart_image(chart),
+                   "source_image": render_region_image(page, chart_region.box)}
         metadata = {"route": "chart", "bbox": _box_list(chart_region.box),
                     "provenance": "vision_chart_bbox" if chart_region.box != region.box else "region_bbox",
                     "visual_kind": "chart", "vision_model": visual.get("model"),
@@ -671,22 +672,65 @@ class EquationExtractorAdapter:
 
     def extract(self, document: Document, page: Page, region: Region) -> Iterable[Block]:
         try:
+            visual = (region.metadata or {}).get("vision_result")
+            if isinstance(visual, dict) and visual.get("equations"):
+                equations = [item for item in visual["equations"] if isinstance(item, dict)]
+                base = region.box or Box(0, 0, float(page.width or 0), float(page.height or 0))
+                confidence = max(0.0, min(1.0, float(visual.get("confidence", 0.86))))
+                for index, equation in enumerate(equations, start=1):
+                    equation_region = replace(region, metadata=dict(region.metadata or {}))
+                    normalized_box = equation.get("bbox_norm")
+                    if isinstance(normalized_box, (list, tuple)) and len(normalized_box) == 4:
+                        try:
+                            nx0, ny0, nx1, ny1 = (max(0.0, min(1.0, float(value))) for value in normalized_box)
+                            x0 = base.x0 + nx0 * (base.x1 - base.x0)
+                            y0 = base.y0 + ny0 * (base.y1 - base.y0)
+                            x1 = base.x0 + nx1 * (base.x1 - base.x0)
+                            y1 = base.y0 + ny1 * (base.y1 - base.y0)
+                            if x1 > x0 and y1 > y0:
+                                equation_region.box = Box(x0, y0, x1, y1)
+                        except (TypeError, ValueError):
+                            pass
+                    if len(equations) > 1:
+                        equation_region.region_id = f"{region.region_id}-equation-{index}"
+                        equation_region.reading_order = region.reading_order + index - 1
+                    latex = str(equation.get("latex") or "").strip()
+                    text = str(equation.get("text") or "").strip()
+                    if not latex:
+                        latex = _equation_latex(text)
+                    if not text:
+                        text = latex
+                    if not latex and not text:
+                        continue
+                    yield _make_block(
+                        document=document, page=page, region=equation_region, block_type="equation",
+                        content={"latex": latex, "text": text, "math_like": True,
+                                 "source_image": render_region_image(page, equation_region.box)},
+                        confidence=confidence, extractor=self.name,
+                        metadata={"route": "vision_equation", "vision_model": visual.get("model"),
+                                  "vision_provider": visual.get("provider"), "bbox": _box_list(equation_region.box)},
+                    )
+                return
+
             text = _extract_text_from_page(page, region)
             math_like = bool(text and _MATH_RE.search(text))
             if math_like:
                 yield _make_block(
                     document=document, page=page, region=region, block_type="equation",
-                    content={"latex": _equation_latex(text), "text": text, "math_like": True},
+                    content={"latex": _equation_latex(text), "text": text, "math_like": True,
+                             "source_image": render_region_image(page, region.box)},
                     confidence=0.95, extractor=self.name,
                     metadata={"route": "equation", "source": "native_pdf_text", "bbox": _box_list(region.box)},
                 )
                 return
-            visual = _vision_result(page, region)
+            if not isinstance(visual, dict):
+                visual = _vision_result(page, region)
             if visual and (visual.get("latex") or visual.get("text")):
                 latex = visual.get("latex") or _equation_latex(visual.get("text") or "")
                 yield _make_block(
                     document=document, page=page, region=region, block_type="equation",
-                    content={"latex": latex, "text": visual.get("text") or latex, "math_like": True},
+                    content={"latex": latex, "text": visual.get("text") or latex, "math_like": True,
+                             "source_image": render_region_image(page, region.box)},
                     confidence=max(0.86, float(visual.get("confidence", 0.86))), extractor=self.name,
                     metadata={"route": "equation", "vision_model": visual.get("model"),
                               "vision_provider": visual.get("provider"), "bbox": _box_list(region.box)},
@@ -708,7 +752,8 @@ class EquationExtractorAdapter:
                 page=page,
                 region=region,
                 block_type="equation",
-                content={"latex": _equation_latex(text) if math_like else None, "text": text, "math_like": math_like},
+                content={"latex": _equation_latex(text) if math_like else None, "text": text, "math_like": math_like,
+                         "source_image": render_region_image(page, region.box)},
                 confidence=conf,
                 extractor=self.name,
                 flags=flags,
@@ -720,7 +765,8 @@ class EquationExtractorAdapter:
                 page=page,
                 region=region,
                 block_type="equation",
-                content={"latex": None, "text": _region_text_hint(region) or "[equation]", "math_like": False},
+                content={"latex": None, "text": _region_text_hint(region) or "[equation]", "math_like": False,
+                         "source_image": render_region_image(page, region.box)},
                 confidence=0.3,
                 extractor=self.name,
                 flags=["extractor_error", "low_confidence"],
@@ -775,7 +821,8 @@ def _typed_visual_block(
             chart = visual.get("chart", {})
             content = {"text": visual.get("text") or caption, "caption": caption,
                        "description": visual.get("description", ""), "chart": chart,
-                       **chart_artifacts(chart), "plot_image": render_chart_image(chart)}
+                       **chart_artifacts(chart), "plot_image": render_chart_image(chart),
+                       "source_image": render_region_image(page, region.box)}
         elif output_type == "equation" and visual:
             content = {"latex": visual.get("latex", ""), "text": visual.get("text", caption), "math_like": True}
         elif output_type == "text" and visual:
@@ -784,6 +831,8 @@ def _typed_visual_block(
             content = {"text": (visual or {}).get("text") or caption,
                        "caption": caption,
                        "description": (visual or {}).get("description") or caption}
+        if output_type in {"figure", "diagram"}:
+            content["source_image"] = render_region_image(page, region.box)
         yield _make_block(
             document=document,
             page=page,
@@ -796,12 +845,15 @@ def _typed_visual_block(
             metadata=meta,
         )
     except Exception as exc:
+        content = {"caption": default_caption, "description": default_caption}
+        if block_type in {"chart", "figure", "diagram"}:
+            content["source_image"] = render_region_image(page, region.box)
         yield _make_block(
             document=document,
             page=page,
             region=region,
             block_type=block_type,
-            content={"caption": default_caption, "description": default_caption},
+            content=content,
             confidence=0.3,
             extractor=extractor_name,
             flags=["extractor_error", "low_confidence"],

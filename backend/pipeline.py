@@ -35,19 +35,37 @@ class _VisionImageBackend:
         result = get_vision_service().analyze(page, region)
         if not result:
             region.metadata["classification_status"] = "vision_unavailable"
-            return [(RegionType.SCANNED_TEXT, 0.35, {"vision_fallback": True})]
+            region.metadata["vision_error"] = "Vision analysis returned no result"
+            fallback = {"vision_fallback": True}
+            return [
+                (RegionType.FIGURE, 0.35, {**fallback, "fallback_kind": "visual"}),
+                (RegionType.SCANNED_TEXT, 0.3, {**fallback, "fallback_kind": "ocr"}),
+            ]
         if result.get("error"):
             region.metadata["vision_error"] = result["error"]
             region.metadata["classification_status"] = "vision_failed"
-            return [(RegionType.SCANNED_TEXT, 0.35, {"vision_fallback": True})]
+            fallback = {"vision_fallback": True}
+            return [
+                (RegionType.FIGURE, 0.35, {**fallback, "fallback_kind": "visual"}),
+                (RegionType.SCANNED_TEXT, 0.3, {**fallback, "fallback_kind": "ocr"}),
+            ]
         region.metadata["vision_result"] = result
+        from detection.image_classifier import IMAGE_LABELS
+        confidence = result.get("confidence", 0.86)
+        metadata = {"vision_result": result, "vision_provider": result.get("provider")}
+        predictions = []
+        if result.get("charts") or isinstance(result.get("chart"), dict) and result["chart"]:
+            predictions.append((IMAGE_LABELS["chart"], confidence, metadata))
+        if result.get("equations"):
+            predictions.append((IMAGE_LABELS["equation"], confidence, metadata))
+        if predictions:
+            return predictions
         route = {
             "table": "table", "chart": "chart", "figure": "figure",
             "equation": "equation", "text_block": "text",
         }.get(result.get("block_type"), "text")
-        from detection.image_classifier import IMAGE_LABELS
         label = next((key for key, value in IMAGE_LABELS.items() if value.value == route), "text")
-        return [(IMAGE_LABELS[label], result.get("confidence", 0.86), {"vision_result": result, "vision_provider": result.get("provider")})]
+        return [(IMAGE_LABELS[label], confidence, metadata)]
 
 
 def build_router() -> Router:

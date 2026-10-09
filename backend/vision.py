@@ -94,11 +94,15 @@ def _crop_png(page: Any, region: Any) -> bytes | None:
         return None
 
 
-_PROMPT = """Inspect the whole supplied document crop. Extract only information visibly present; never infer missing values.
-Return exactly one JSON object with keys: block_type, text, description, latex, table, charts, chart, confidence.
+_PROMPT = """Inspect the whole supplied document crop. Extract information visibly present and distinguish direct readings from visual estimates.
+Return exactly one JSON object with keys: block_type, text, description, latex, equations, table, charts, chart, confidence.
 block_type must be one of: text_block, table, chart, figure, equation.
 Transcribe printed text, cursive handwriting, and freehand notes faithfully in reading order. Preserve line breaks and spelling; never silently omit unclear writing. Mark genuinely unreadable spans as [illegible] and keep readable surrounding text. Do not summarize text. Put equations in standard LaTeX in `latex` (without display delimiters). For tables, `table` is an object with `matrix` (array of rows and cell strings) and `markdown`.
-For each separately plotted graph on the crop, emit one object in `charts`; do not merge distinct plots. If a plot, graph axes, curve, or chart is visible, set `block_type` to `chart` even if it is hand-drawn or its data is partly unclear. Each chart object has `title`, `chart_type`, `x_axis`, `y_axis`, `series`, and optional `bbox_norm` `[x0,y0,x1,y1]` with coordinates normalized to 0..1 relative to the supplied crop. `bbox_norm` should tightly cover only that plot, including axes and labels. Each series has `name`, `labels`, `values` (numeric values or null), optional numeric `x_values` (one x coordinate per y value), and optional boolean `estimated`. For continuous curves, use `x_values` and `values` as coordinate pairs. Transcribe values printed on the visual exactly. For hand-drawn curves, sample enough coordinate pairs along each visible curve to reconstruct its shape; use actual axis values and units when legible. If the scale is ambiguous, use grid-relative labels, keep uncertain values null, and explain uncertainty; never invent precise values. `chart` may repeat the first chart for backwards compatibility. In `text`, transcribe all chart titles, axis labels, scale annotations, legends, and other visible text verbatim in reading order. Do not substitute a prose description for graph data. In `description`, briefly describe visual structure and data uncertainty. Use empty strings/nulls/empty arrays for absent fields. Set confidence to a number from 0 to 1 based only on legibility. Do not include preambles or markdown fences."""
+For each separately plotted graph on the crop, emit one object in `charts`; do not merge distinct plots. If a plot, graph axes, curve, or chart is visible, set `block_type` to `chart` even if its data is partly unclear. Each chart object has `title`, `chart_type`, `x_axis`, `y_axis`, `series`, and optional `bbox_norm` `[x0,y0,x1,y1]` normalized to the supplied crop; tightly cover the plot, including axes and labels. Each series has `name`, `labels`, `values` (numbers or null), optional numeric `x_values` (one x coordinate per y value), and optional boolean `estimated`.
+For every chart, cross-check the visual itself against its title, `description`, transcribed `text`, axis labels, tick marks, legend, and any labels or annotations before finalizing the series. Use the description and text to identify the intended trend, series, categories, and endpoints; use them to fill omissions when they are supported by visible evidence. If the visual clearly shows a curve or bars but exact values are not printed, sample points from the pixels and map them through the visible axes/ticks. Interpolate approximate values from the scale where possible. For an unnumbered axis, use a consistent normalized 0..1 coordinate scale and explain it. Populate enough ordered points to reproduce the visible shape; do not return an empty series or all-null values for a legible plotted line, curve, bar, or pie slice. Mark pixel-read or description-guided values with `estimated: true`; keep exact printed values unestimated. If the description conflicts with plotted evidence, prefer the visual and note the conflict. Never present an estimate as an exact reading or invent precision unsupported by the image.
+For continuous curves, use numeric `x_values` and `values` as coordinate pairs. For category charts, keep category names in `labels` and values aligned with them. If an axis is an object, put its readable axis label in `x_axis` or `y_axis` and put numeric ticks in `x_ticks` or `y_ticks`; do not return an object where a label string is expected. `chart` may repeat the first chart for backwards compatibility.
+Equations are independent of charts: if any equation or formula is visible, populate top-level `latex` and also add every separate equation to `equations`, even when `block_type` is `chart`, `figure`, or another type. Each `equations` item has `latex`, verbatim `text`, and optional `bbox_norm` for the equation crop. Preserve fractions, roots, superscripts, subscripts, Greek letters, and grouping; do not omit an equation because the same image contains a graph.
+In `text`, transcribe all chart titles, axis labels, scale annotations, legends, equation text and other visible text verbatim in reading order. Do not substitute a prose description for chart data or equation notation. In `description`, briefly describe visual structure and data uncertainty. Use empty strings/nulls/empty arrays only for fields that are genuinely absent or unreadable. Set confidence to a number from 0 to 1 based only on legibility. Do not include preambles or markdown fences."""
 
 
 def _parse_json(text: str) -> dict[str, Any] | None:
@@ -137,10 +141,61 @@ def _normalize(result: dict[str, Any]) -> dict[str, Any]:
         text = latex
     table = result.get("table") if isinstance(result.get("table"), dict) else {}
     chart = result.get("chart") if isinstance(result.get("chart"), dict) else {}
-    charts = result.get("charts") if isinstance(result.get("charts"), list) else []
-    charts = [item for item in charts if isinstance(item, dict)]
-    if not charts and chart:
-        charts = [chart]
+    def normalize_chart(value: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(value)
+        for axis_key, ticks_key in (("x_axis", "x_ticks"), ("y_axis", "y_ticks")):
+            axis = normalized.get(axis_key)
+            if isinstance(axis, dict):
+                label = axis.get("label")
+                ticks = axis.get("ticks")
+                if isinstance(ticks, list) and ticks_key not in normalized:
+                    normalized[ticks_key] = ticks
+                normalized[axis_key] = str(label) if label is not None else ""
+            elif axis is not None and not isinstance(axis, str):
+                normalized[axis_key] = str(axis)
+        if not str(normalized.get("title") or "").strip():
+            x_label = str(normalized.get("x_axis") or "").strip()
+            y_label = str(normalized.get("y_axis") or "").strip()
+            normalized["title"] = f"{y_label} vs {x_label}" if x_label and y_label else (
+                y_label or x_label or "Extracted chart"
+            )
+        raw_series = normalized.get("series")
+        if isinstance(raw_series, list):
+            normalized_series = []
+            for source in raw_series:
+                if not isinstance(source, dict):
+                    continue
+                item = dict(source)
+                values = item.get("values") if isinstance(item.get("values"), list) else []
+                labels = item.get("labels") if isinstance(item.get("labels"), list) else []
+                x_values = item.get("x_values") if isinstance(item.get("x_values"), list) else []
+                if len(labels) < len(values):
+                    labels.extend(
+                        str(x_values[index]) if index < len(x_values) and x_values[index] is not None
+                        else str(index + 1)
+                        for index in range(len(labels), len(values))
+                    )
+                item["labels"] = labels
+                item["values"] = values
+                normalized_series.append(item)
+            normalized["series"] = normalized_series
+        return normalized
+
+    raw_charts = result.get("charts") if isinstance(result.get("charts"), list) else []
+    charts: list[dict[str, Any]] = []
+    seen_charts: set[str] = set()
+    for item in raw_charts + ([chart] if chart else []):
+        if not isinstance(item, dict):
+            continue
+        normalized_chart = normalize_chart(item)
+        if str(normalized_chart.get("chart_type") or "").strip().lower() in {
+            "legend", "chart legend", "key", "color key",
+        }:
+            continue
+        signature = json.dumps(normalized_chart, sort_keys=True, ensure_ascii=False, default=str)
+        if signature not in seen_charts:
+            charts.append(normalized_chart)
+            seen_charts.add(signature)
     chart_series = [series for item in charts for series in
                     (item.get("series") if isinstance(item.get("series"), list) else [])]
     if kind not in {"table", "equation"} and any(
@@ -159,9 +214,15 @@ def _normalize(result: dict[str, Any]) -> dict[str, Any]:
         confidence = min(confidence, 0.4)
     if charts and kind not in {"table", "equation"}:
         kind = "chart"
-    chart = chart or (charts[0] if charts else {})
+    chart = normalize_chart(chart) if chart else (charts[0] if charts else {})
+    raw_equations = result.get("equations") if isinstance(result.get("equations"), list) else []
+    equations = [dict(item) for item in raw_equations if isinstance(item, dict)]
+    if not equations and (latex or (kind == "equation" and text)):
+        equations = [{"latex": latex or text, "text": text or latex}]
+    elif latex and not any(str(item.get("latex") or "").strip() == latex for item in equations):
+        equations.insert(0, {"latex": latex, "text": text or latex})
     return {"block_type": kind, "text": text.strip(), "description": desc.strip(), "latex": latex.strip(),
-            "table": table, "chart": chart, "charts": charts, "confidence": confidence,
+            "table": table, "chart": chart, "charts": charts, "equations": equations, "confidence": confidence,
             "provider": None, "model": None}
 
 
@@ -201,7 +262,11 @@ class VisionService:
                     response = self._gemini_client.models.generate_content(
                         model=model,
                         contents=[types.Part.from_bytes(data=image, mime_type="image/png"), _PROMPT],
-                        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0),
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0,
+                            max_output_tokens=6000,
+                        ),
                     )
                     parsed = _parse_json(response.text or "")
                 else:
@@ -218,7 +283,7 @@ class VisionService:
                             {"type": "image_url", "image_url": {"url": data_url}},
                         ]}],
                         temperature=0,
-                        max_tokens=3000,
+                        max_tokens=6000,
                     )
                     parsed = _parse_json(response.choices[0].message.content or "")
                 if parsed is None:
@@ -238,4 +303,3 @@ class VisionService:
 @lru_cache(maxsize=1)
 def get_vision_service() -> VisionService:
     return VisionService()
-

@@ -314,13 +314,6 @@
 .demo__table th { color: var(--accent); background: var(--bg-deep); }
 .demo__chart-wrap { margin-top: 0.65rem; padding: 0.55rem; border: 1px solid var(--border); color: var(--text-secondary); }
 .demo__chart-title { font-size: 0.75rem; margin-bottom: 0.4rem; }
-.demo__plots { display: grid; gap: 0.75rem; padding: 0.75rem; }
-.demo__plot-card { min-width: 0; padding: 0.65rem; border: 1px solid var(--border); background: var(--bg-panel); }
-.demo__plot-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
-.demo__plot-heading h3 { color: var(--text-primary); font-size: 0.78rem; font-weight: 600; }
-.demo__plot-heading span { flex: none; color: var(--text-muted); font-size: 0.58rem; }
-.demo__plot-image { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; background: #fff; }
-.demo__plot-fallback .demo__chart-wrap { margin: 0; }
 .demo__matplotlib-output { margin: 0.45rem 0; padding: 0.4rem; border: 1px solid var(--border-strong); background: #fff; }
 .demo__render-label { margin-bottom: 0.25rem; color: #0f766e; font-size: 0.58rem; letter-spacing: 0.08em; }
 .demo__matplotlib-image { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; }
@@ -329,8 +322,10 @@
 .demo__chart-details { margin-top: 0.55rem; font-size: 0.72rem; }
 .demo__chart-details summary { color: var(--accent); cursor: pointer; }
 .demo__chart-details .demo__code { max-height: 250px; overflow: auto; padding: 0.55rem; background: var(--bg-deep); }
-.demo__equation { margin-top: 0.55rem; padding: 0.6rem; border: 1px dashed var(--border-strong); font-family: var(--font-mono); color: var(--accent); overflow-wrap: anywhere; }
-.demo__equation-display { font-size: 0.9rem; line-height: 1.6; }
+.demo__equation { margin-top: 0.55rem; padding: 0.6rem; border: 1px dashed var(--border-strong); color: var(--accent); overflow-wrap: anywhere; }
+.demo__equation-typeset { min-width: 0; padding: 0.7rem 0.25rem; overflow-x: auto; color: var(--text-primary); font-size: 1.05rem; }
+.demo__equation-typeset .katex-display { margin: 0; text-align: left; }
+.demo__equation-text { color: var(--text-primary); font-size: 0.9rem; line-height: 1.6; overflow-wrap: anywhere; }
 
 .demo__flag {
   padding: 0 0.3rem;
@@ -443,6 +438,99 @@
   width: 100%;
   max-height: 360px;
   object-fit: contain;
+}
+
+.demo__visual-results {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.demo__visual-results-heading {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.demo__visual-card {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.demo__visual-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+}
+
+.demo__visual-heading h4 {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.demo__visual-heading span,
+.demo__visual-confidence {
+  color: var(--text-muted);
+  font-size: 0.58rem;
+}
+
+.demo__visual-description {
+  margin-bottom: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.demo__visual-warning {
+  margin: 0.45rem 0;
+  padding: 0.45rem;
+  border-left: 2px solid var(--warning);
+  color: var(--warning);
+  font-size: 0.66rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.demo__visual-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.demo__visual-image {
+  min-width: 0;
+  margin: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.demo__visual-image > img {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+
+.demo__visual-crop {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+.demo__visual-crop img {
+  position: absolute;
+  max-width: none;
+}
+
+.demo__visual-confidence {
+  margin-top: 0.5rem;
 }
 
 @media (max-width: 1100px) {
